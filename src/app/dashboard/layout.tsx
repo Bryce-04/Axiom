@@ -20,7 +20,7 @@ export default function DashboardLayout({
             Auctions
           </Link>
           <Link
-            href="/settings"
+            href="/dashboard/settings"
             className="text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
           >
             Settings
