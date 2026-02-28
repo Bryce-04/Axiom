@@ -58,7 +58,7 @@ export default async function TriageItemPage({
         {!hasPrice && (
           <div className="mt-2 rounded-lg bg-red-950/50 border border-red-900 px-3 py-2">
             <p className="text-xs text-red-400">
-              ⚠ No market price set — go to the desktop catalog to add one
+              No market price set — go to the desktop catalog to add one
             </p>
           </div>
         )}
@@ -73,6 +73,8 @@ export default async function TriageItemPage({
             lot_number:        item.lot_number,
             enhancement_value: item.enhancement_value,
             status:            item.status,
+            price_low:         item.price_low  ?? null,
+            price_high:        item.price_high ?? null,
           }}
           bids={bids}
         />

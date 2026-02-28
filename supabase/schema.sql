@@ -20,6 +20,7 @@ DROP TABLE    IF EXISTS items                    CASCADE;
 DROP TABLE    IF EXISTS profiles                 CASCADE;
 DROP TABLE    IF EXISTS fee_configs              CASCADE;
 DROP TABLE    IF EXISTS auctions                 CASCADE;
+DROP TABLE    IF EXISTS auction_presets          CASCADE;
 DROP TABLE    IF EXISTS settings                 CASCADE;
 
 
@@ -42,6 +43,52 @@ INSERT INTO settings (key, value) VALUES
   ('poor_pct',       '0.30');    -- Poor:          30%
 
 
+-- Auction presets (templates that pre-fill fees and research sources)
+CREATE TABLE auction_presets (
+  id                    uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                  text         NOT NULL,
+  category              text,
+  buyer_premium         numeric(6,4) NOT NULL DEFAULT 0.18,
+  state_tax             numeric(6,4) NOT NULL DEFAULT 0.07,
+  -- Research source 1: label + URL template with {name} placeholder
+  source_1_label        text,
+  source_1_url_template text,
+  -- Research source 2: label + URL template with {name} placeholder
+  source_2_label        text,
+  source_2_url_template text,
+  -- Methodology note shown in the scraper panel
+  protocol_note         text,
+  sort_order            integer      DEFAULT 0,
+  created_at            timestamptz  DEFAULT now()
+);
+
+INSERT INTO auction_presets
+  (name, category, buyer_premium, state_tax,
+   source_1_label, source_1_url_template,
+   source_2_label, source_2_url_template,
+   protocol_note, sort_order)
+VALUES
+  (
+    'Firearm Auction', 'Firearms',
+    0.18, 0.07,
+    'GunBroker Completed Sales',
+    'https://www.gunbroker.com/All/search?Keywords={name}&Completed=true&Sort=13',
+    'Proxibid / Rock Island Archives',
+    'https://www.proxibid.com/asp/Search.asp?searchString={name}&submit=Go',
+    'Dial-In Protocol: Search GunBroker completed sales, pull the last 5, drop the high and low outliers, average the middle 3. Cross-check on True Gun Value (truegunconsignment.com). Vintage pieces: also verify Proxibid / Rock Island archives.',
+    1
+  ),
+  (
+    'General Estate Sale', 'General',
+    0.15, 0.07,
+    'eBay Completed Sales',
+    'https://www.ebay.com/sch/i.html?_nkw={name}&LH_Sold=1&LH_Complete=1',
+    null, null,
+    'Search eBay completed / sold listings. Pull the last 5–10 sold prices, trim outliers, use the middle average as your base market value.',
+    2
+  );
+
+
 -- Auction events
 CREATE TABLE auctions (
   id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,6 +97,7 @@ CREATE TABLE auctions (
   location       text,
   buyer_premium  numeric(6,4) NOT NULL DEFAULT 0.18,  -- 0.18 = 18%
   state_tax      numeric(6,4) NOT NULL DEFAULT 0.07,  -- 0.07 = 7%
+  preset_id      uuid        REFERENCES auction_presets(id),
   is_active      boolean      DEFAULT true,
   created_at     timestamptz  DEFAULT now()
 );
@@ -100,6 +148,13 @@ CREATE TABLE items (
   scrape_status       text NOT NULL DEFAULT 'manual'
                         CHECK (scrape_status IN ('manual','success','partial','failed')),
 
+  -- -------------------------------------------------------
+  -- Price range (low/high of the trimmed scraped set)
+  -- Populated on scrape-confirm; NULL when entered manually.
+  -- -------------------------------------------------------
+  price_low           numeric(10,2),
+  price_high          numeric(10,2),
+
   created_at          timestamptz DEFAULT now()
 );
 
@@ -133,11 +188,11 @@ CREATE TABLE profiles (
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO profiles (id, name)
+  INSERT INTO public.profiles (id, name)
   VALUES (NEW.id, NEW.raw_user_meta_data->>'name');
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -155,6 +210,7 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 -- ============================================================
 
 ALTER TABLE settings            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auction_presets     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auctions            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fee_configs         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE items               ENABLE ROW LEVEL SECURITY;
@@ -164,6 +220,10 @@ ALTER TABLE profiles            ENABLE ROW LEVEL SECURITY;
 -- settings: everyone reads, only admin writes
 CREATE POLICY "settings: read"        ON settings FOR SELECT TO authenticated USING (true);
 CREATE POLICY "settings: admin write" ON settings FOR ALL    TO authenticated USING (get_user_role() = 'admin');
+
+-- auction_presets: everyone reads, only admin writes
+CREATE POLICY "auction_presets: read"        ON auction_presets FOR SELECT TO authenticated USING (true);
+CREATE POLICY "auction_presets: admin write" ON auction_presets FOR ALL    TO authenticated USING (get_user_role() = 'admin');
 
 -- auctions: everyone reads, only admin writes
 CREATE POLICY "auctions: read"        ON auctions FOR SELECT TO authenticated USING (true);
@@ -234,6 +294,8 @@ item_matrix AS (
     i.enhancement_value,
     i.status,
     i.scrape_status,
+    i.price_low,
+    i.price_high,
     COALESCE(i.fee_config_id, df.id) AS fee_config_id,
     t.condition,
     co.override_value,
@@ -263,6 +325,8 @@ SELECT
   im.base_market_value,
   im.enhancement_value,
   im.override_value,
+  im.price_low,
+  im.price_high,
 
   -- Condition-specific resale value before enhancement is added
   COALESCE(im.override_value, im.base_market_value * im.condition_pct)

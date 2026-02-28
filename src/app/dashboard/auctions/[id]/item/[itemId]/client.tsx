@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { ItemStatus, BidResult } from '@/lib/types'
+import type { ItemStatus, AuctionPreset } from '@/lib/types'
 
 // ─────────────────────────────────────────────────────────────
 // Status Selector
@@ -140,12 +140,24 @@ export function ValuesEditor({
 interface ScrapeResult {
   prices: number[]
   average: number
+  low: number
+  high: number
   status: 'success' | 'partial' | 'failed'
   error?: string
   urlsScraped: number
 }
 
-export function ScraperPanel({ itemId, auctionId }: { itemId: string; auctionId: string }) {
+export function ScraperPanel({
+  itemId,
+  auctionId,
+  itemName,
+  preset,
+}: {
+  itemId: string
+  auctionId: string
+  itemName: string
+  preset?: AuctionPreset | null
+}) {
   const router = useRouter()
   const [url1, setUrl1] = useState('')
   const [url2, setUrl2] = useState('')
@@ -153,6 +165,13 @@ export function ScraperPanel({ itemId, auctionId }: { itemId: string; auctionId:
   const [result, setResult] = useState<ScrapeResult | null>(null)
   const [applying, setApplying] = useState(false)
   const [applied, setApplied] = useState(false)
+
+  // Suppress unused variable warning — auctionId available for future use
+  void auctionId
+
+  function buildSearchUrl(template: string) {
+    return template.replace('{name}', encodeURIComponent(itemName))
+  }
 
   async function handleScrape(e: React.FormEvent) {
     e.preventDefault()
@@ -177,14 +196,62 @@ export function ScraperPanel({ itemId, auctionId }: { itemId: string; auctionId:
     const supabase = createClient()
     await supabase.from('items').update({
       base_market_value: result.average,
+      price_low:  result.low  > 0 ? result.low  : null,
+      price_high: result.high > 0 ? result.high : null,
     }).eq('id', itemId)
     setApplied(true)
     setApplying(false)
     router.refresh()
   }
 
+  const hasResearchSources =
+    preset &&
+    (preset.source_1_url_template || preset.source_2_url_template)
+
   return (
     <div className="space-y-4">
+
+      {/* Research sources from preset */}
+      {hasResearchSources && (
+        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-3 space-y-2">
+          <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
+            Research Sources
+          </p>
+          {preset!.protocol_note && (
+            <p className="text-xs text-neutral-400 leading-relaxed">
+              {preset!.protocol_note}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {preset!.source_1_label && preset!.source_1_url_template && (
+              <a
+                href={buildSearchUrl(preset!.source_1_url_template)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+              >
+                {preset!.source_1_label}
+                <span className="text-neutral-400">↗</span>
+              </a>
+            )}
+            {preset!.source_2_label && preset!.source_2_url_template && (
+              <a
+                href={buildSearchUrl(preset!.source_2_url_template)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+              >
+                {preset!.source_2_label}
+                <span className="text-neutral-400">↗</span>
+              </a>
+            )}
+          </div>
+          <p className="text-xs text-neutral-400">
+            Find completed sales on those sites, then paste the listing URL(s) below.
+          </p>
+        </div>
+      )}
+
       <form onSubmit={handleScrape} className="space-y-3">
         <div>
           <label className="block text-xs font-medium text-neutral-500 mb-1.5">
@@ -233,11 +300,18 @@ export function ScraperPanel({ itemId, auctionId }: { itemId: string; auctionId:
             </p>
           ) : (
             <>
-              <div className="flex items-baseline justify-between">
-                <p className="text-sm font-semibold text-green-800 dark:text-green-200">
-                  Found {result.prices.length} prices
-                  {result.status === 'partial' && ' (one URL failed)'}
-                </p>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-green-800 dark:text-green-200">
+                    Found {result.prices.length} prices
+                    {result.status === 'partial' && ' (one URL failed)'}
+                  </p>
+                  {result.low > 0 && result.high > 0 && result.low !== result.high && (
+                    <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                      Range: ${result.low.toFixed(2)} – ${result.high.toFixed(2)}
+                    </p>
+                  )}
+                </div>
                 <p className="text-lg font-bold text-green-800 dark:text-green-200">
                   Avg: ${result.average.toFixed(2)}
                 </p>

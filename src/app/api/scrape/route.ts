@@ -55,17 +55,24 @@ function extractPrices(html: string, url: string): number[] {
   return prices
 }
 
-// Trimmed mean: drop the top and bottom 10% to eliminate outliers,
-// then average whatever remains.
-function trimmedMean(prices: number[]): number {
-  if (prices.length === 0) return 0
+// Trimmed stats: drop top and bottom 10% to eliminate outliers,
+// then return average, low, and high of the trimmed set.
+function trimmedStats(prices: number[]): { average: number; low: number; high: number } {
+  if (prices.length === 0) return { average: 0, low: 0, high: 0 }
   if (prices.length <= 3) {
-    return prices.reduce((a, b) => a + b, 0) / prices.length
+    const sorted = [...prices].sort((a, b) => a - b)
+    const average = sorted.reduce((a, b) => a + b, 0) / sorted.length
+    return { average, low: sorted[0], high: sorted[sorted.length - 1] }
   }
   const sorted = [...prices].sort((a, b) => a - b)
   const trim = Math.max(1, Math.floor(sorted.length * 0.1))
   const trimmed = sorted.slice(trim, sorted.length - trim)
-  return trimmed.reduce((a, b) => a + b, 0) / trimmed.length
+  const average = trimmed.reduce((a, b) => a + b, 0) / trimmed.length
+  return {
+    average,
+    low:  trimmed[0],
+    high: trimmed[trimmed.length - 1],
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -106,6 +113,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       prices: [],
       average: 0,
+      low: 0,
+      high: 0,
       status: 'failed',
       error: 'Could not fetch the first URL. The site may be blocking automated requests. Try a different URL or enter the price manually.',
     })
@@ -120,12 +129,17 @@ export async function POST(request: Request) {
     return NextResponse.json({
       prices: [],
       average: 0,
+      low: 0,
+      high: 0,
       status: 'failed',
       error: 'No prices found on the page. Check that the URL points to completed/sold listings.',
     })
   }
 
-  const average = Math.round(trimmedMean(allPrices) * 100) / 100
+  const stats = trimmedStats(allPrices)
+  const average   = Math.round(stats.average * 100) / 100
+  const priceLow  = Math.round(stats.low     * 100) / 100
+  const priceHigh = Math.round(stats.high    * 100) / 100
   const scrapeStatus = url2Failed ? 'partial' : 'success'
 
   // Save transparency columns to DB (does NOT update base_market_value —
@@ -136,11 +150,15 @@ export async function POST(request: Request) {
     raw_scraped_prices: allPrices,
     scraped_at: new Date().toISOString(),
     scrape_status: scrapeStatus,
+    price_low:  priceLow,
+    price_high: priceHigh,
   }).eq('id', item_id)
 
   return NextResponse.json({
     prices: allPrices,
     average,
+    low:  priceLow,
+    high: priceHigh,
     status: scrapeStatus,
     urlsScraped: url2 ? (url2Failed ? 1 : 2) : 1,
   })

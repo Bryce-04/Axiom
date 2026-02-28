@@ -26,6 +26,8 @@ interface ItemProps {
   lot_number: string | null
   enhancement_value: number
   status: ItemStatus
+  price_low: number | null
+  price_high: number | null
 }
 
 export function TriageClient({
@@ -147,6 +149,14 @@ export function TriageClient({
                 Break-even ceiling: <span className="text-neutral-500">${calc.breakEven.toFixed(2)}</span>
               </p>
             )}
+            {item.price_low != null && item.price_high != null && (
+              <p className="text-xs text-neutral-700 mt-1">
+                Market range:{' '}
+                <span className="text-neutral-600">
+                  ${item.price_low.toFixed(0)} – ${item.price_high.toFixed(0)}
+                </span>
+              </p>
+            )}
           </>
 
         ) : (
@@ -156,6 +166,14 @@ export function TriageClient({
             </p>
             <p className="text-[80px] font-black text-red-500 leading-none">PASS</p>
             <p className="text-sm text-neutral-600 mt-3">Fees exceed resale value</p>
+            {item.price_low != null && item.price_high != null && (
+              <p className="text-xs text-neutral-700 mt-1">
+                Market range:{' '}
+                <span className="text-neutral-600">
+                  ${item.price_low.toFixed(0)} – ${item.price_high.toFixed(0)}
+                </span>
+              </p>
+            )}
           </>
         )}
       </section>

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import type { BidResult, Condition } from '@/lib/types'
+import type { BidResult, Condition, AuctionPreset } from '@/lib/types'
 import { StatusSelector, ValuesEditor, ScraperPanel } from './client'
 
 const CONDITION_ORDER: Condition[] = ['NIB', 'Excellent', 'Fair', 'Poor']
@@ -17,7 +17,11 @@ export default async function ItemPage({
   const [{ data: item }, { data: rawBids }, { data: auction }] = await Promise.all([
     supabase.from('items').select('*').eq('id', itemId).single(),
     supabase.from('bid_results').select('*').eq('item_id', itemId),
-    supabase.from('auctions').select('name').eq('id', auctionId).single(),
+    supabase
+      .from('auctions')
+      .select('name, preset_id, auction_presets(*)')
+      .eq('id', auctionId)
+      .single(),
   ])
 
   if (!item) notFound()
@@ -26,6 +30,14 @@ export default async function ItemPage({
   const bids = CONDITION_ORDER.map(c =>
     rawBids?.find((b: BidResult) => b.condition === c) ?? null
   )
+
+  // Extract preset from the joined auction row (Supabase returns as object or null)
+  const preset = (auction?.auction_presets ?? null) as AuctionPreset | null
+
+  const priceRange =
+    item.price_low != null && item.price_high != null
+      ? { low: item.price_low, high: item.price_high }
+      : null
 
   return (
     <div className="max-w-4xl">
@@ -84,7 +96,11 @@ export default async function ItemPage({
               <p className="text-xs text-neutral-400 mt-1">Enter a value or use the scraper below</p>
             </div>
           ) : (
-            <BidTable bids={bids} desiredProfit={bids.find(b => b)?.desired_profit ?? 0} />
+            <BidTable
+              bids={bids}
+              desiredProfit={bids.find(b => b)?.desired_profit ?? 0}
+              priceRange={priceRange}
+            />
           )}
         </div>
       </div>
@@ -93,7 +109,7 @@ export default async function ItemPage({
       <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-5 mb-8">
         <h2 className="text-base font-semibold mb-1">Price Scraper</h2>
         <p className="text-xs text-neutral-500 mb-4">
-          Paste eBay completed/sold listing URLs. The scraper finds all sold prices, trims outliers, and calculates an average.
+          Paste completed/sold listing URLs. The scraper finds all sold prices, trims outliers, and calculates an average.
         </p>
 
         {/* Audit trail */}
@@ -116,7 +132,12 @@ export default async function ItemPage({
           </div>
         )}
 
-        <ScraperPanel itemId={item.id} auctionId={auctionId} />
+        <ScraperPanel
+          itemId={item.id}
+          auctionId={auctionId}
+          itemName={item.name}
+          preset={preset}
+        />
       </div>
 
       {/* Notes */}
@@ -133,9 +154,27 @@ export default async function ItemPage({
 // ─────────────────────────────────────────────────────────────
 // Bid Results Table
 // ─────────────────────────────────────────────────────────────
-function BidTable({ bids, desiredProfit }: { bids: (BidResult | null)[]; desiredProfit: number }) {
+function BidTable({
+  bids,
+  desiredProfit,
+  priceRange,
+}: {
+  bids: (BidResult | null)[]
+  desiredProfit: number
+  priceRange?: { low: number; high: number } | null
+}) {
   return (
     <div className="space-y-2">
+      {/* Market range banner */}
+      {priceRange && (
+        <div className="rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 px-4 py-2.5 flex items-center justify-between">
+          <p className="text-xs text-neutral-500">Market range</p>
+          <p className="text-sm font-semibold text-neutral-900 dark:text-white font-mono">
+            ${priceRange.low.toFixed(2)} – ${priceRange.high.toFixed(2)}
+          </p>
+        </div>
+      )}
+
       <div className="rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800">
         <table className="w-full text-sm">
           <thead>

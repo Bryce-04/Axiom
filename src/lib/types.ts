@@ -7,6 +7,21 @@ export type ItemStatus  = 'pending' | 'target' | 'watch' | 'pass' | 'won' | 'los
 export type ScrapeStatus = 'manual' | 'success' | 'partial' | 'failed'
 export type UserRole    = 'admin' | 'viewer'
 
+export interface AuctionPreset {
+  id:                    string
+  name:                  string
+  category:              string | null
+  buyer_premium:         number
+  state_tax:             number
+  source_1_label:        string | null
+  source_1_url_template: string | null
+  source_2_label:        string | null
+  source_2_url_template: string | null
+  protocol_note:         string | null
+  sort_order:            number
+  created_at:            string
+}
+
 export interface Auction {
   id:            string
   name:          string
@@ -14,6 +29,7 @@ export interface Auction {
   location:      string | null
   buyer_premium: number
   state_tax:     number
+  preset_id:     string | null
   is_active:     boolean
   created_at:    string
 }
@@ -35,6 +51,8 @@ export interface Item {
   raw_scraped_prices:  number[] | null
   scraped_at:          string | null
   scrape_status:       ScrapeStatus
+  price_low:           number | null
+  price_high:          number | null
   created_at:          string
 }
 
@@ -66,6 +84,8 @@ export interface BidResult {
   base_market_value:     number
   enhancement_value:     number
   override_value:        number | null
+  price_low:             number | null
+  price_high:            number | null
   condition_resale_value: number
   effective_resale:      number
   platform_name:         string
