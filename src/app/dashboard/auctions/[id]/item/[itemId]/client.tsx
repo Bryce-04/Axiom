@@ -135,6 +135,131 @@ export function ValuesEditor({
 }
 
 // ─────────────────────────────────────────────────────────────
+// Auto-Research Panel
+// ─────────────────────────────────────────────────────────────
+interface AutoResearchResult {
+  prices: number[]
+  average: number
+  low: number
+  high: number
+  source: string
+  status: 'success' | 'failed'
+  error?: string
+}
+
+export function AutoResearchPanel({ itemId, itemName }: { itemId: string; itemName: string }) {
+  const router = useRouter()
+  const [loading,  setLoading]  = useState(false)
+  const [result,   setResult]   = useState<AutoResearchResult | null>(null)
+  const [applying, setApplying] = useState(false)
+  const [applied,  setApplied]  = useState(false)
+
+  async function handleResearch() {
+    setLoading(true)
+    setResult(null)
+    setApplied(false)
+    const res = await fetch('/api/auto-research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, item_name: itemName }),
+    })
+    setResult(await res.json())
+    setLoading(false)
+  }
+
+  async function handleApply() {
+    if (!result || result.average <= 0) return
+    setApplying(true)
+    const supabase = createClient()
+    await supabase.from('items').update({
+      base_market_value: result.average,
+      price_low:  result.low  > 0 ? result.low  : null,
+      price_high: result.high > 0 ? result.high : null,
+    }).eq('id', itemId)
+    setApplied(true)
+    setApplying(false)
+    router.refresh()
+  }
+
+  return (
+    <div className="space-y-3">
+      {!result ? (
+        <button
+          onClick={handleResearch}
+          disabled={loading}
+          className="w-full rounded-lg bg-neutral-900 dark:bg-white py-3 text-sm font-semibold text-white dark:text-neutral-900 hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center justify-center gap-2"
+        >
+          {loading ? (
+            <>
+              <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white dark:border-neutral-400/30 dark:border-t-neutral-900 rounded-full animate-spin" />
+              Researching market prices…
+            </>
+          ) : (
+            'Auto-Research Market Value'
+          )}
+        </button>
+      ) : result.status === 'failed' ? (
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 p-4 space-y-2">
+          <p className="text-sm text-red-600 dark:text-red-400">{result.error}</p>
+          <button onClick={handleResearch} className="text-xs text-red-500 underline underline-offset-2">
+            Try again
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-4 space-y-3">
+          <div className="flex items-start justify-between flex-wrap gap-2">
+            <div>
+              <p className="text-sm font-semibold text-green-800 dark:text-green-200">
+                {result.prices.length} prices found via {result.source}
+              </p>
+              {result.low > 0 && result.high > 0 && (
+                <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                  Range: ${result.low.toFixed(2)} – ${result.high.toFixed(2)}
+                </p>
+              )}
+            </div>
+            <p className="text-xl font-bold text-green-800 dark:text-green-200">
+              Avg: ${result.average.toFixed(2)}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {result.prices.slice(0, 24).map((p, i) => (
+              <span key={i} className="rounded px-2 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs font-mono">
+                ${p.toFixed(2)}
+              </span>
+            ))}
+          </div>
+
+          {applied ? (
+            <p className="text-sm font-medium text-green-700 dark:text-green-300">
+              ✓ Applied ${result.average.toFixed(2)} as market value — bid results updated
+            </p>
+          ) : (
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={handleApply}
+                disabled={applying}
+                className="rounded-md bg-green-700 dark:bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 transition-opacity"
+              >
+                {applying ? 'Applying…' : `Apply $${result.average.toFixed(2)}`}
+              </button>
+              <button
+                onClick={handleResearch}
+                disabled={loading}
+                className="rounded-md border border-green-300 dark:border-green-700 px-3 py-2 text-sm font-medium text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900 disabled:opacity-40 transition-colors"
+              >
+                Re-research
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // Scraper Panel
 // ─────────────────────────────────────────────────────────────
 interface ScrapeResult {

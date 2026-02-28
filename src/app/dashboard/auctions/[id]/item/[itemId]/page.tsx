@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { BidResult, Condition, AuctionPreset } from '@/lib/types'
-import { StatusSelector, ValuesEditor, ScraperPanel } from './client'
+import { StatusSelector, ValuesEditor, ScraperPanel, AutoResearchPanel } from './client'
 
 const CONDITION_ORDER: Condition[] = ['NIB', 'Excellent', 'Fair', 'Poor']
 
@@ -105,11 +105,20 @@ export default async function ItemPage({
         </div>
       </div>
 
-      {/* Scraper */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-5 mb-8">
-        <h2 className="text-base font-semibold mb-1">Price Scraper</h2>
+      {/* Auto-Research */}
+      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-5 mb-4">
+        <h2 className="text-base font-semibold mb-1">Auto-Research</h2>
         <p className="text-xs text-neutral-500 mb-4">
-          Paste completed/sold listing URLs. The scraper finds all sold prices, trims outliers, and calculates an average.
+          Automatically searches eBay sold listings and GunBroker completed sales by item name. One click — no URLs needed.
+        </p>
+        <AutoResearchPanel itemId={item.id} itemName={item.name} />
+      </div>
+
+      {/* Manual Scraper (fallback) */}
+      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-5 mb-8">
+        <h2 className="text-base font-semibold mb-1">Manual Price Entry</h2>
+        <p className="text-xs text-neutral-500 mb-4">
+          Paste specific completed-listing URLs if auto-research did not find the right data.
         </p>
 
         {/* Audit trail */}
