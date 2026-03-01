@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Item } from '@/lib/types'
+import { DeleteItemButton } from './DeleteItemButton'
 
 export default async function AuctionPage({
   params,
@@ -147,12 +148,15 @@ function ItemRow({ item, auctionId }: { item: Item; auctionId: string }) {
         </span>
       </td>
       <td className="px-4 py-3 text-right">
-        <Link
-          href={`/dashboard/auctions/${auctionId}/item/${item.id}`}
-          className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
-        >
-          Detail →
-        </Link>
+        <div className="flex items-center justify-end gap-3">
+          <DeleteItemButton itemId={item.id} auctionId={auctionId} />
+          <Link
+            href={`/dashboard/auctions/${auctionId}/item/${item.id}`}
+            className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
+          >
+            Detail →
+          </Link>
+        </div>
       </td>
     </tr>
   )

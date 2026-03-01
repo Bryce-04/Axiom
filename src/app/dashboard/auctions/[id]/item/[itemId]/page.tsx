@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { BidResult, Condition, AuctionPreset } from '@/lib/types'
 import { StatusSelector, ValuesEditor, ScraperPanel, AutoResearchPanel } from './client'
+import { DeleteItemButton } from '../../DeleteItemButton'
 
 const CONDITION_ORDER: Condition[] = ['NIB', 'Excellent', 'Fair', 'Poor']
 
@@ -156,6 +157,15 @@ export default async function ItemPage({
           <p className="text-sm text-neutral-700 dark:text-neutral-300">{item.notes}</p>
         </div>
       )}
+
+      {/* Danger zone */}
+      <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-medium text-neutral-500">Delete this item</p>
+          <p className="text-xs text-neutral-400 mt-0.5">Permanently removes this lot. Cannot be undone.</p>
+        </div>
+        <DeleteItemButton itemId={item.id} auctionId={auctionId} />
+      </div>
     </div>
   )
 }
