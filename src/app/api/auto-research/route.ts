@@ -1,87 +1,65 @@
-import { load } from 'cheerio'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
-// Allow up to 60s — this hits multiple external APIs
+// Allow up to 60s on Pro; Hobby is hard-capped at 10s regardless
 export const maxDuration = 60
 
-const FETCH_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-}
+// Single consolidated Gemini+Search call across all four sources.
+// Google Search grounding fetches live data; we parse the structured response.
+async function searchAllSources(itemName: string): Promise<{
+  gunbroker:    number[]
+  rockisland:   number[]
+  truegunvalue: number[]
+  ebay:         number[]
+}> {
+  const empty = { gunbroker: [], rockisland: [], truegunvalue: [], ebay: [] }
 
-// Fetch a page and return cleaned body text (strips scripts/styles/nav)
-async function fetchPageText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      headers: FETCH_HEADERS,
-      signal: AbortSignal.timeout(9000),
-    })
-    if (!res.ok) return null
-    const html = await res.text()
-    const $ = load(html)
-    $('script, style, nav, footer, header, iframe, noscript, aside').remove()
-    const text = $('body').text().replace(/\s+/g, ' ').trim()
-    return text.length > 200 ? text : null
-  } catch {
-    return null
-  }
-}
-
-// Ask Gemini to extract sold prices from a block of page text
-async function extractPricesFromText(text: string, itemName: string): Promise<number[]> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-
-  const { response } = await model.generateContent({
-    contents: [{
-      role: 'user',
-      parts: [{ text:
-        `You are extracting completed auction sale prices from webpage text.\n` +
-        `Item being researched: "${itemName}"\n\n` +
-        `Rules:\n` +
-        `- Only include FINAL SOLD prices in USD\n` +
-        `- Exclude: asking prices, unsold listings, shipping costs, estimates\n` +
-        `- If a price appears multiple times for the same listing, count it once\n\n` +
-        `Respond ONLY with valid JSON, no other text: {"prices": [350, 325, 375]}\n` +
-        `If no valid sold prices found: {"prices": []}\n\n` +
-        `Webpage text:\n` + text.slice(0, 22000)
-      }],
-    }],
-    generationConfig: { responseMimeType: 'application/json' },
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    tools: [{ googleSearch: {} } as never],
   })
 
+  const prompt =
+    `Search for recent completed sale prices for "${itemName}" from these four sources:\n\n` +
+    `1. GunBroker.com — completed/sold auction results\n` +
+    `2. Rock Island Auction Company (rockislandauction.com) — recent hammer prices\n` +
+    `3. True Gun Value (truegunvalue.com) — market values and recent sold prices\n` +
+    `4. eBay (ebay.com) — completed/sold listings\n\n` +
+    `For each source return only final sold/hammer prices in USD. ` +
+    `Exclude asking prices, reserves, shipping costs, and unsold listings.\n\n` +
+    `Your entire response must be a single JSON object and nothing else — no explanation, ` +
+    `no markdown, no code fences. Use empty arrays if no prices are found for a source:\n` +
+    `{"gunbroker":[350,325],"rockisland":[400,380],"truegunvalue":[360,340],"ebay":[330,355]}`
+
   try {
-    const data = JSON.parse(response.text())
-    return (data.prices ?? []).filter(
-      (p: unknown) => typeof p === 'number' && p > 5 && p < 100000
-    )
+    const { response } = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      // Note: responseMimeType cannot be used alongside googleSearch grounding —
+      // JSON structure is enforced via the prompt instead.
+    })
+
+    // Extract the JSON object from the response text (grounding may add citations
+    // after the JSON, so we grab the first {...} block)
+    const text  = response.text()
+    const match = text.match(/\{[\s\S]*\}/)
+    if (!match) return empty
+    const data = JSON.parse(match[0])
+    const clean = (arr: unknown): number[] =>
+      (Array.isArray(arr) ? arr : []).filter(
+        (p: unknown) => typeof p === 'number' && p > 5 && p < 100000
+      )
+
+    return {
+      gunbroker:    clean(data.gunbroker),
+      rockisland:   clean(data.rockisland),
+      truegunvalue: clean(data.truegunvalue),
+      ebay:         clean(data.ebay),
+    }
   } catch {
-    return []
+    return empty
   }
-}
-
-// Fallback: ask Gemini to search Google for recent sale prices
-async function searchPricesWithGemini(itemName: string): Promise<number[]> {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  // Tool typed as unknown to satisfy package version differences
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', tools: [{ googleSearchRetrieval: {} } as never] })
-
-  const { response } = await model.generateContent(
-    `Find the 5 most recent completed sale prices for "${itemName}" on GunBroker.com or eBay. ` +
-    `Return only the final hammer/sale prices in USD as a comma-separated list of plain numbers. ` +
-    `Example response: 350, 425, 380, 290, 410`
-  )
-
-  const text = response.text()
-  const prices = [...text.matchAll(/\b(\d{2,5}(?:\.\d{2})?)\b/g)]
-    .map(m => parseFloat(m[1]))
-    .filter(p => p > 10 && p < 100000)
-    .slice(0, 15)
-
-  return prices
 }
 
 // Trimmed stats: drop top/bottom 10%, return average + range
@@ -91,17 +69,17 @@ function trimmedStats(prices: number[]): { average: number; low: number; high: n
     const sorted = [...prices].sort((a, b) => a - b)
     return {
       average: sorted.reduce((a, b) => a + b, 0) / sorted.length,
-      low: sorted[0],
-      high: sorted[sorted.length - 1],
+      low:     sorted[0],
+      high:    sorted[sorted.length - 1],
     }
   }
   const sorted = [...prices].sort((a, b) => a - b)
-  const trim = Math.max(1, Math.floor(sorted.length * 0.1))
+  const trim    = Math.max(1, Math.floor(sorted.length * 0.1))
   const trimmed = sorted.slice(trim, sorted.length - trim)
   return {
     average: trimmed.reduce((a, b) => a + b, 0) / trimmed.length,
-    low: trimmed[0],
-    high: trimmed[trimmed.length - 1],
+    low:     trimmed[0],
+    high:    trimmed[trimmed.length - 1],
   }
 }
 
@@ -119,33 +97,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'item_id and item_name are required' }, { status: 400 })
   }
 
-  // Build search URLs from the item name — no manual URL entry needed
-  const eBayUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(item_name)}&LH_Sold=1&LH_Complete=1&_sop=13`
-  const gbUrl   = `https://www.gunbroker.com/All/search?Keywords=${encodeURIComponent(item_name)}&Completed=true&Sort=13`
+  const results = await searchAllSources(item_name)
 
-  // Fetch eBay and GunBroker concurrently to save time
-  const [eBayText, gbText] = await Promise.all([
-    fetchPageText(eBayUrl),
-    fetchPageText(gbUrl),
-  ])
-
-  // Extract prices from both sources concurrently
-  const [eBayPrices, gbPrices] = await Promise.all([
-    eBayText ? extractPricesFromText(eBayText, item_name) : Promise.resolve([]),
-    gbText   ? extractPricesFromText(gbText,   item_name) : Promise.resolve([]),
-  ])
-
-  let allPrices = [...eBayPrices, ...gbPrices]
   const sources: string[] = []
-  if (eBayPrices.length > 0) sources.push('eBay')
-  if (gbPrices.length > 0)   sources.push('GunBroker')
+  if (results.gunbroker.length > 0)    sources.push('GunBroker')
+  if (results.rockisland.length > 0)   sources.push('Rock Island')
+  if (results.truegunvalue.length > 0) sources.push('True Gun Value')
+  if (results.ebay.length > 0)         sources.push('eBay')
 
-  // Fallback: Gemini searches Google if we have fewer than 3 prices
-  if (allPrices.length < 3) {
-    const searchPrices = await searchPricesWithGemini(item_name)
-    allPrices = [...allPrices, ...searchPrices]
-    if (searchPrices.length > 0) sources.push('web search')
-  }
+  const allPrices = [
+    ...results.gunbroker,
+    ...results.rockisland,
+    ...results.truegunvalue,
+    ...results.ebay,
+  ]
 
   if (allPrices.length === 0) {
     return NextResponse.json({
@@ -156,21 +121,20 @@ export async function POST(request: Request) {
     })
   }
 
-  const stats    = trimmedStats(allPrices)
-  const average  = Math.round(stats.average * 100) / 100
-  const priceLow = Math.round(stats.low     * 100) / 100
-  const priceHigh = Math.round(stats.high   * 100) / 100
-  const source   = sources.join(' + ')
+  const stats     = trimmedStats(allPrices)
+  const average   = Math.round(stats.average * 100) / 100
+  const priceLow  = Math.round(stats.low     * 100) / 100
+  const priceHigh = Math.round(stats.high    * 100) / 100
+  const source    = sources.join(' + ')
 
-  // Save research metadata to DB (base_market_value is set when user confirms)
   await supabase.from('items').update({
-    source_url_1:      eBayUrl,
-    source_url_2:      gbUrl,
+    source_url_1:       `https://www.gunbroker.com/All/search?Keywords=${encodeURIComponent(item_name)}&Completed=true`,
+    source_url_2:       `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(item_name)}&LH_Sold=1&LH_Complete=1`,
     raw_scraped_prices: allPrices,
-    scraped_at:        new Date().toISOString(),
-    scrape_status:     'success',
-    price_low:         priceLow,
-    price_high:        priceHigh,
+    scraped_at:         new Date().toISOString(),
+    scrape_status:      'success',
+    price_low:          priceLow,
+    price_high:         priceHigh,
   }).eq('id', item_id)
 
   return NextResponse.json({

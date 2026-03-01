@@ -75,7 +75,7 @@ VALUES
     'https://www.gunbroker.com/All/search?Keywords={name}&Completed=true&Sort=13',
     'Proxibid / Rock Island Archives',
     'https://www.proxibid.com/asp/Search.asp?searchString={name}&submit=Go',
-    'Dial-In Protocol: Search GunBroker completed sales, pull the last 5, drop the high and low outliers, average the middle 3. Cross-check on True Gun Value (truegunconsignment.com). Vintage pieces: also verify Proxibid / Rock Island archives.',
+    'Dial-In Protocol: Search GunBroker completed sales, pull the last 5, drop the high and low outliers, average the middle 3. Cross-check on True Gun Value (truegunvalue.com). Vintage pieces: also verify Proxibid / Rock Island archives.',
     1
   ),
   (
