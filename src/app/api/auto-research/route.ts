@@ -17,8 +17,8 @@ async function searchAllSources(itemName: string): Promise<{
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    tools: [{ googleSearch: {} } as never],
+    model: 'gemini-1.5-flash',
+    tools: [{ googleSearchRetrieval: {} }],
   })
 
   const prompt =
