@@ -11,7 +11,7 @@ export const maxDuration = 60
 // data in training and returns usable price ranges for common items.
 async function searchAllSources(itemName: string): Promise<number[]> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
   const { response } = await model.generateContent(
     `You are a firearms auction price analyst with knowledge of GunBroker, Rock Island Auction, ` +
