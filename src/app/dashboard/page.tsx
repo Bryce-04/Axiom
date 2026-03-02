@@ -92,6 +92,12 @@ function AuctionCard({ auction }: { auction: Auction }) {
           Triage
         </Link>
         <Link
+          href={`/live/${auction.id}`}
+          className="rounded-md border border-green-300 dark:border-green-800 px-3 py-1.5 text-xs font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
+        >
+          Live
+        </Link>
+        <Link
           href={`/dashboard/auctions/${auction.id}`}
           className="rounded-md bg-neutral-900 dark:bg-white px-3 py-1.5 text-xs font-semibold text-white dark:text-neutral-900 hover:opacity-90 transition-opacity"
         >

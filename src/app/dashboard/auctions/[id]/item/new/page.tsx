@@ -108,7 +108,7 @@ export default function NewItemPage({
           />
         </Field>
 
-        <Field label="Market Value (NIB)" hint="optional — set via scraper or enter manually">
+        <Field label="Market Value" hint="optional — from your research">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">$</span>
             <input
@@ -122,7 +122,7 @@ export default function NewItemPage({
             />
           </div>
           <p className="mt-1 text-xs text-neutral-400">
-            Leave at $0 and use the scraper on the item detail page to populate this.
+            Completed-sales average from your pre-auction research.
           </p>
         </Field>
 

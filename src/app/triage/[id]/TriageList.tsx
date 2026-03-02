@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import type { Item, ItemStatus, ScrapeStatus } from '@/lib/types'
+import type { Item, ItemStatus } from '@/lib/types'
 
 const FILTERS = [
   { value: 'all',     label: 'All' },
@@ -16,20 +16,22 @@ const FILTERS = [
 
 type Filter = typeof FILTERS[number]['value']
 
-const STATUS_COLORS: Record<ItemStatus, string> = {
+const STATUS_BORDER: Record<ItemStatus, string> = {
+  pending: 'border-neutral-800',
+  target:  'border-green-600',
+  watch:   'border-amber-500',
+  pass:    'border-neutral-800 opacity-60',
+  won:     'border-green-600',
+  lost:    'border-neutral-800',
+}
+
+const STATUS_BADGE: Record<ItemStatus, string> = {
   pending: 'bg-neutral-700 text-neutral-400',
-  target:  'bg-blue-900 text-blue-300',
+  target:  'bg-green-900 text-green-300',
   watch:   'bg-amber-900 text-amber-300',
   pass:    'bg-neutral-800 text-neutral-600',
   won:     'bg-green-900 text-green-300',
   lost:    'bg-red-950 text-red-400',
-}
-
-const SCRAPE_COLORS: Record<ScrapeStatus, string> = {
-  success: 'bg-green-500',
-  partial: 'bg-amber-500',
-  failed:  'bg-red-500',
-  manual:  'bg-neutral-600',
 }
 
 export function TriageList({ items, auctionId }: { items: Item[]; auctionId: string }) {
@@ -79,7 +81,7 @@ export function TriageList({ items, auctionId }: { items: Item[]; auctionId: str
             <Link
               key={item.id}
               href={`/triage/${auctionId}/${item.id}`}
-              className="flex items-center gap-3 rounded-2xl bg-neutral-900 border border-neutral-800 px-4 py-4 active:bg-neutral-800 transition-colors"
+              className={`flex items-center gap-3 rounded-2xl bg-neutral-900 border-2 px-4 py-4 active:bg-neutral-800 transition-colors ${STATUS_BORDER[item.status]}`}
             >
               {/* Lot # */}
               <span className="w-10 shrink-0 font-mono text-xs text-neutral-600 text-right">
@@ -90,7 +92,7 @@ export function TriageList({ items, auctionId }: { items: Item[]; auctionId: str
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-white leading-snug truncate">{item.name}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[item.status]}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[item.status]}`}>
                     {item.status}
                   </span>
                   {item.base_market_value > 0 ? (
@@ -103,11 +105,12 @@ export function TriageList({ items, auctionId }: { items: Item[]; auctionId: str
                 </div>
               </div>
 
-              {/* Scrape status dot */}
-              <span
-                title={`Data source: ${item.scrape_status}`}
-                className={`w-2 h-2 rounded-full shrink-0 ${SCRAPE_COLORS[item.scrape_status]}`}
-              />
+              {/* Velocity badge */}
+              {item.velocity_score && (
+                <span className="font-mono text-xs font-bold text-neutral-500 shrink-0">
+                  [ {item.velocity_score} ]
+                </span>
+              )}
 
               {/* Chevron */}
               <span className="text-neutral-700 text-lg shrink-0">›</span>

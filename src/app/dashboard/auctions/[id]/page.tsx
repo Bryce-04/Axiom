@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Item } from '@/lib/types'
 import { DeleteItemButton } from './DeleteItemButton'
+import { ImportPanel } from './ImportPanel'
 
 export default async function AuctionPage({
   params,
@@ -40,12 +41,26 @@ export default async function AuctionPage({
               {date}{auction.location ? ` · ${auction.location}` : ''}
             </p>
           </div>
-          <Link
-            href={`/triage/${auction.id}`}
-            className="shrink-0 rounded-md border border-neutral-200 dark:border-neutral-700 px-4 py-2 text-sm font-medium hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-          >
-            Open Triage →
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/triage/${auction.id}`}
+              className="shrink-0 rounded-md border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+            >
+              Triage
+            </Link>
+            <Link
+              href={`/live/${auction.id}`}
+              className="shrink-0 rounded-md border border-green-300 dark:border-green-800 px-3 py-2 text-sm font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 transition-colors"
+            >
+              Live →
+            </Link>
+            <Link
+              href={`/api/export/${auction.id}`}
+              className="shrink-0 rounded-md border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm font-medium text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+            >
+              Export ↓
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -58,6 +73,11 @@ export default async function AuctionPage({
           value={`${((auction.buyer_premium + auction.state_tax + auction.buyer_premium * auction.state_tax) * 100).toFixed(1)}%`}
           hint="compounded"
         />
+      </div>
+
+      {/* Import */}
+      <div className="mb-6">
+        <ImportPanel auctionId={auction.id} />
       </div>
 
       {/* Items */}
@@ -92,7 +112,7 @@ export default async function AuctionPage({
                 <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Lot</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Name</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Market Value</th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Source</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Velocity</th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Status</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -112,17 +132,11 @@ export default async function AuctionPage({
 function ItemRow({ item, auctionId }: { item: Item; auctionId: string }) {
   const statusColors: Record<string, string> = {
     pending: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400',
-    target:  'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    target:  'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
     watch:   'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
     pass:    'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-600',
     won:     'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
     lost:    'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400',
-  }
-  const scrapeColors: Record<string, string> = {
-    manual:  'bg-neutral-400',
-    success: 'bg-green-500',
-    partial: 'bg-amber-500',
-    failed:  'bg-red-500',
   }
 
   return (
@@ -136,11 +150,8 @@ function ItemRow({ item, auctionId }: { item: Item; auctionId: string }) {
           ? `$${item.base_market_value.toFixed(2)}`
           : <span className="text-neutral-400 text-xs">No price</span>}
       </td>
-      <td className="px-4 py-3 text-center">
-        <span
-          title={item.scrape_status}
-          className={`inline-block w-2 h-2 rounded-full ${scrapeColors[item.scrape_status]}`}
-        />
+      <td className="px-4 py-3 text-center font-mono text-xs font-bold text-neutral-500">
+        {item.velocity_score ? `[ ${item.velocity_score} ]` : '—'}
       </td>
       <td className="px-4 py-3 text-center">
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[item.status]}`}>

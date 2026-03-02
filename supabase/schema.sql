@@ -121,41 +121,41 @@ INSERT INTO fee_configs (platform_name, platform_fee, shipping_cost, is_default)
 
 -- Auction catalog items
 CREATE TABLE items (
-  id                 uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  auction_id         uuid          NOT NULL REFERENCES auctions(id)    ON DELETE CASCADE,
-  lot_number         text,
-  name               text          NOT NULL,
-  description        text,
-  category           text,
-  base_market_value  numeric(10,2) NOT NULL DEFAULT 0.00,
-  -- Added BEFORE fee deductions (scopes, mags, extra gear)
-  enhancement_value  numeric(10,2) NOT NULL DEFAULT 0.00,
+  id                  uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
+  auction_id          uuid          NOT NULL REFERENCES auctions(id) ON DELETE CASCADE,
+  lot_number          text,
+  name                text          NOT NULL,
+  description         text,
+  category            text,
+  base_market_value   numeric(10,2) NOT NULL DEFAULT 0.00,
+  -- Added BEFORE fee deductions (scopes, mags, extra gear spotted on the floor)
+  enhancement_value   numeric(10,2) NOT NULL DEFAULT 0.00,
   -- NULL falls back to the fee_config marked is_default = true
-  fee_config_id      uuid          REFERENCES fee_configs(id),
-  status             text          NOT NULL DEFAULT 'pending'
-                       CHECK (status IN ('pending','target','watch','pass','won','lost')),
-  notes              text,
+  fee_config_id       uuid          REFERENCES fee_configs(id),
+  status              text          NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','target','watch','pass','won','lost')),
+  notes               text,
 
   -- -------------------------------------------------------
-  -- Scraper transparency columns
-  -- Populated by the /api/scrape route.
-  -- Left NULL when base_market_value is entered manually.
+  -- Velocity & Triage  (set during the pre-auction floor walk)
   -- -------------------------------------------------------
-  source_url_1        text,                  -- First research URL (for audit)
-  source_url_2        text,                  -- Second research URL (for audit)
-  raw_scraped_prices  numeric(10,2)[],       -- Every individual price found across both URLs
-  scraped_at          timestamptz,           -- Timestamp of last successful scrape
-  scrape_status       text NOT NULL DEFAULT 'manual'
-                        CHECK (scrape_status IN ('manual','success','partial','failed')),
+  velocity_score      text          CHECK (velocity_score IN ('A','B','C')),
+  --   A = Fast flip / liquid item    → can bid aggressively
+  --   B = Steady seller              → bid to target only
+  --   C = Slow / trap / niche        → bid well below target or skip
+
+  final_condition     text          CHECK (final_condition IN ('NIB','Excellent','Fair','Poor')),
+  --   NULL = not yet triaged; view defaults to 'Excellent'
+
+  triage_notes        text,         -- Free-form floor observations (rust, missing parts, etc.)
 
   -- -------------------------------------------------------
-  -- Price range (low/high of the trimmed scraped set)
-  -- Populated on scrape-confirm; NULL when entered manually.
+  -- Live Auction  (logged during the auction)
   -- -------------------------------------------------------
-  price_low           numeric(10,2),
-  price_high          numeric(10,2),
+  final_hammer_price  numeric(10,2),  -- Logged for EVERY lot, not just wins
+  auction_result      text          CHECK (auction_result IN ('won','lost','pass')),
 
-  created_at          timestamptz DEFAULT now()
+  created_at          timestamptz   DEFAULT now()
 );
 
 
@@ -250,24 +250,28 @@ CREATE POLICY "profiles: self update" ON profiles FOR UPDATE TO authenticated US
 -- ============================================================
 -- SECTION 4: BID RESULTS VIEW  (The Math Engine)
 --
--- Virtual table — never stored on disk. Every query
--- recalculates live using the latest settings, fees, and items.
--- No sync or update logic needed anywhere in the app.
+-- Virtual table — never stored on disk. Every query recalculates
+-- live from the latest settings, fees, and items.
 --
--- Formula:
---   effective_resale = COALESCE(override_value, base_market_value * condition_pct)
---                      + enhancement_value
---   net_revenue      = effective_resale * (1 - platform_fee) - shipping_cost
---   target_bid       = (net_revenue - desired_profit)
---                      / ((1 + buyer_premium) * (1 + state_tax))
---   break_even_bid   = net_revenue
---                      / ((1 + buyer_premium) * (1 + state_tax))
+-- Returns ONE row per item (not 4). Uses final_condition on the
+-- item itself; defaults to 'Excellent' when not yet triaged.
+--
+-- Four output bid numbers:
+--   target_bid      = (net_revenue - desired_profit)
+--                     / ((1 + buyer_premium) * (1 + state_tax))
+--   break_even_bid  = net_revenue
+--                     / ((1 + buyer_premium) * (1 + state_tax))
+--   retail_max_bid  = base_market_value
+--                     / ((1 + buyer_premium) * (1 + state_tax))
+--
+-- desired_profit is a USD dollar amount (e.g. 50.00 = $50 target
+-- profit per deal), not a percentage.
 -- ============================================================
 
 CREATE VIEW bid_results AS
 WITH
 
--- Pivot the settings key-value rows into one clean flat row
+-- Pivot settings key-value rows into one flat row
 gs AS (
   SELECT
     MAX(CASE WHEN key = 'desired_profit' THEN value::numeric END) AS desired_profit,
@@ -278,93 +282,100 @@ gs AS (
   FROM settings
 ),
 
--- Fallback platform when an item has no fee_config_id assigned
+-- Default fee config fallback when item has no fee_config_id
 default_fee AS (
   SELECT id FROM fee_configs WHERE is_default = true LIMIT 1
 ),
 
--- Cross-join every item with all 4 condition tiers
-item_matrix AS (
+-- Join each item with its auction, fees, settings, and active condition override
+base AS (
   SELECT
-    i.id                AS item_id,
+    i.id                                          AS item_id,
     i.auction_id,
-    i.name              AS item_name,
+    i.name                                        AS item_name,
     i.lot_number,
+    i.status,
+    i.velocity_score,
+    COALESCE(i.final_condition, 'Excellent')      AS condition,
     i.base_market_value,
     i.enhancement_value,
-    i.status,
-    i.scrape_status,
-    i.price_low,
-    i.price_high,
-    COALESCE(i.fee_config_id, df.id) AS fee_config_id,
-    t.condition,
+    COALESCE(i.fee_config_id, df.id)              AS fee_config_id,
     co.override_value,
     gs.desired_profit,
-    CASE t.condition
+    -- Condition % from settings, resolved for this item's active condition
+    CASE COALESCE(i.final_condition, 'Excellent')
       WHEN 'NIB'       THEN gs.nib_pct
       WHEN 'Excellent' THEN gs.excellent_pct
       WHEN 'Fair'      THEN gs.fair_pct
       WHEN 'Poor'      THEN gs.poor_pct
-    END AS condition_pct
+    END                                            AS condition_pct,
+    a.buyer_premium,
+    a.state_tax
   FROM items i
-  CROSS JOIN (SELECT unnest(ARRAY['NIB','Excellent','Fair','Poor']) AS condition) t
   CROSS JOIN gs
   CROSS JOIN default_fee df
+  JOIN auctions a ON a.id = i.auction_id
+  -- Only join the override for this item's active condition (one row max)
   LEFT JOIN condition_overrides co
-    ON co.item_id = i.id AND co.condition = t.condition
+    ON  co.item_id   = i.id
+    AND co.condition = COALESCE(i.final_condition, 'Excellent')
 )
 
 SELECT
-  im.item_id,
-  im.auction_id,
-  im.item_name,
-  im.lot_number,
-  im.status,
-  im.scrape_status,
-  im.condition,
-  im.base_market_value,
-  im.enhancement_value,
-  im.override_value,
-  im.price_low,
-  im.price_high,
+  b.item_id,
+  b.auction_id,
+  b.item_name,
+  b.lot_number,
+  b.status,
+  b.velocity_score,
+  b.condition,
+  b.base_market_value,
+  b.enhancement_value,
+  b.override_value,
 
-  -- Condition-specific resale value before enhancement is added
-  COALESCE(im.override_value, im.base_market_value * im.condition_pct)
+  -- Condition-adjusted resale value (before enhancement)
+  COALESCE(b.override_value, b.base_market_value * b.condition_pct)
     AS condition_resale_value,
 
   -- Full effective resale: condition value + enhancement gear
-  (COALESCE(im.override_value, im.base_market_value * im.condition_pct) + im.enhancement_value)
+  COALESCE(b.override_value, b.base_market_value * b.condition_pct)
+    + b.enhancement_value
     AS effective_resale,
 
   fc.platform_name,
   fc.platform_fee,
   fc.shipping_cost,
-  a.buyer_premium,
-  a.state_tax,
-  im.desired_profit,
+  b.buyer_premium,
+  b.state_tax,
+  b.desired_profit,
 
-  -- Net revenue: pocket amount after platform fees and shipping
+  -- Net revenue: pocket amount after platform fee and shipping
   ROUND(
-    (COALESCE(im.override_value, im.base_market_value * im.condition_pct) + im.enhancement_value)
+    (COALESCE(b.override_value, b.base_market_value * b.condition_pct) + b.enhancement_value)
     * (1 - fc.platform_fee) - fc.shipping_cost
   , 2) AS net_revenue,
 
-  -- TARGET BID: max hammer price that still clears desired profit
+  -- TARGET BID: max hammer price that still clears desired_profit (USD amount)
   ROUND(
     (
-      (COALESCE(im.override_value, im.base_market_value * im.condition_pct) + im.enhancement_value)
-      * (1 - fc.platform_fee) - fc.shipping_cost - im.desired_profit
-    ) / ((1 + a.buyer_premium) * (1 + a.state_tax))
+      (COALESCE(b.override_value, b.base_market_value * b.condition_pct) + b.enhancement_value)
+      * (1 - fc.platform_fee) - fc.shipping_cost - b.desired_profit
+    ) / ((1 + b.buyer_premium) * (1 + b.state_tax))
   , 2) AS target_bid,
 
-  -- BREAK-EVEN BID: absolute ceiling — $0 profit above this number
+  -- BREAK-EVEN BID: zero-profit ceiling for resale
   ROUND(
     (
-      (COALESCE(im.override_value, im.base_market_value * im.condition_pct) + im.enhancement_value)
+      (COALESCE(b.override_value, b.base_market_value * b.condition_pct) + b.enhancement_value)
       * (1 - fc.platform_fee) - fc.shipping_cost
-    ) / ((1 + a.buyer_premium) * (1 + a.state_tax))
-  , 2) AS break_even_bid
+    ) / ((1 + b.buyer_premium) * (1 + b.state_tax))
+  , 2) AS break_even_bid,
 
-FROM item_matrix im
-JOIN auctions    a  ON a.id  = im.auction_id
-JOIN fee_configs fc ON fc.id = im.fee_config_id;
+  -- RETAIL MAX BID: keeper price — max before overpaying vs a retail shop
+  --   Ignores platform fees, shipping, and profit margin.
+  ROUND(
+    b.base_market_value / ((1 + b.buyer_premium) * (1 + b.state_tax))
+  , 2) AS retail_max_bid
+
+FROM base b
+JOIN fee_configs fc ON fc.id = b.fee_config_id;

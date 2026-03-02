@@ -1,52 +1,67 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { BidResult, Condition, ItemStatus } from '@/lib/types'
 
 const CONDITIONS: Condition[] = ['NIB', 'Excellent', 'Fair', 'Poor']
 const ENHANCEMENT_INCREMENTS = [25, 50, 100]
 
-// Replicate the bid_results view formula client-side.
-// This gives instant recalculation when enhancement changes —
-// no round-trip to the DB needed.
+// Client-side recalc for instant enhancement feedback.
+// Uses the current bid's condition_resale_value (already condition-adjusted from DB).
 function recalc(bid: BidResult, enhancement: number) {
   const effective  = bid.condition_resale_value + enhancement
   const net        = effective * (1 - bid.platform_fee) - bid.shipping_cost
   const overhead   = (1 + bid.buyer_premium) * (1 + bid.state_tax)
   return {
-    target:    Math.round((net - bid.desired_profit) / overhead * 100) / 100,
-    breakEven: Math.round(net / overhead * 100) / 100,
+    target:     Math.round((net - bid.desired_profit) / overhead * 100) / 100,
+    breakEven:  Math.round(net / overhead * 100) / 100,
+    retailMax:  Math.round(bid.base_market_value / overhead * 100) / 100,
   }
 }
 
 interface ItemProps {
-  id: string
-  name: string
-  lot_number: string | null
+  id:                string
+  name:              string
+  lot_number:        string | null
   enhancement_value: number
-  status: ItemStatus
-  price_low: number | null
-  price_high: number | null
+  status:            ItemStatus
+  final_condition:   Condition | null
 }
 
 export function TriageClient({
   item,
-  bids,
+  bid,
+  auctionRouteId,
 }: {
-  item: ItemProps
-  bids: BidResult[]
+  item:           ItemProps
+  bid:            BidResult
+  auctionRouteId: string
 }) {
-  const [condition,   setCondition]   = useState<Condition | null>(null)
+  const router = useRouter()
+  const [condition,   setCondition]   = useState<Condition | null>(item.final_condition)
   const [enhancement, setEnhancement] = useState(item.enhancement_value)
   const [status,      setStatus]      = useState<ItemStatus>(item.status)
   const [saving,      setSaving]      = useState(false)
+  const [refreshing,  setRefreshing]  = useState(false)
 
-  const bidMap = Object.fromEntries(bids.map(b => [b.condition, b]))
-  const activeBid = condition ? bidMap[condition] : null
-  const calc = activeBid ? recalc(activeBid, enhancement) : null
+  // Use either the refreshed server bid or a client-side estimate for enhancement tweaks.
+  // condition_resale_value from the DB already reflects the current final_condition.
+  const calc = recalc(bid, enhancement)
 
   // ── DB writes ──────────────────────────────────────────────
+
+  async function saveCondition(next: Condition) {
+    if (next === condition && next === item.final_condition) return
+    setCondition(next)
+    setRefreshing(true)
+    const supabase = createClient()
+    await supabase.from('items').update({ final_condition: next }).eq('id', item.id)
+    // Refresh to get the new bid_results row with updated condition_resale_value
+    router.refresh()
+    setRefreshing(false)
+  }
 
   async function saveEnhancement(val: number) {
     const supabase = createClient()
@@ -74,18 +89,15 @@ export function TriageClient({
     saveEnhancement(0)
   }
 
-  // ── Bid display helpers ────────────────────────────────────
+  // ── Bid display ────────────────────────────────────────────
 
-  const dollars = calc && calc.target > 0 ? Math.floor(calc.target) : null
-  const cents   = calc && calc.target > 0
-    ? String(Math.round((calc.target % 1) * 100)).padStart(2, '0')
-    : null
+  const hasMargin = calc.target > 0
 
   const STATUS_BUTTONS: { value: ItemStatus; label: string; active: string; idle: string }[] = [
     {
       value:  'target',
       label:  'TARGET',
-      active: 'bg-blue-600 text-white ring-2 ring-blue-400 ring-offset-2 ring-offset-neutral-950',
+      active: 'bg-green-700 text-white ring-2 ring-green-500 ring-offset-2 ring-offset-neutral-950',
       idle:   'bg-neutral-800 text-neutral-400',
     },
     {
@@ -114,8 +126,9 @@ export function TriageClient({
           {CONDITIONS.map(c => (
             <button
               key={c}
-              onClick={() => setCondition(c)}
-              className={`h-[88px] rounded-2xl text-xl font-bold transition-all active:scale-95 ${
+              onClick={() => saveCondition(c)}
+              disabled={refreshing}
+              className={`h-[88px] rounded-2xl text-xl font-bold transition-all active:scale-95 disabled:opacity-50 ${
                 condition === c
                   ? 'bg-white text-neutral-900'
                   : 'bg-neutral-800 text-neutral-300 active:bg-neutral-700'
@@ -125,56 +138,53 @@ export function TriageClient({
             </button>
           ))}
         </div>
+        {refreshing && (
+          <p className="text-xs text-neutral-600 text-center mt-2">Recalculating…</p>
+        )}
       </section>
 
-      {/* ── Bid display ──────────────────────────────────── */}
-      <section className="border-t border-b border-neutral-800 px-4 py-8 flex flex-col items-center justify-center min-h-[220px]">
+      {/* ── Four-number HUD ──────────────────────────────── */}
+      <section className="border-t border-b border-neutral-800 px-4 py-6">
         {!condition ? (
-          <p className="text-neutral-700 text-base">Select a condition above</p>
-
-        ) : dollars !== null ? (
-          <>
-            <p className="text-xs font-medium tracking-widest text-neutral-500 uppercase mb-3">
-              {condition} · Target Bid
-            </p>
-            <div className="flex items-end leading-none">
-              <span className="text-4xl font-black text-emerald-300 mr-1 mb-2">$</span>
-              <span className="text-[88px] font-black tracking-tight text-emerald-400 leading-none">
-                {dollars}
-              </span>
-              <span className="text-4xl font-black text-emerald-300 mb-2">.{cents}</span>
-            </div>
-            {calc && (
-              <p className="text-sm text-neutral-600 mt-3">
-                Break-even ceiling: <span className="text-neutral-500">${calc.breakEven.toFixed(2)}</span>
-              </p>
-            )}
-            {item.price_low != null && item.price_high != null && (
-              <p className="text-xs text-neutral-700 mt-1">
-                Market range:{' '}
-                <span className="text-neutral-600">
-                  ${item.price_low.toFixed(0)} – ${item.price_high.toFixed(0)}
-                </span>
-              </p>
-            )}
-          </>
-
+          <p className="text-neutral-700 text-base text-center py-8">Select a condition above</p>
         ) : (
-          <>
-            <p className="text-xs font-medium tracking-widest text-neutral-600 uppercase mb-3">
-              {condition}
-            </p>
-            <p className="text-[80px] font-black text-red-500 leading-none">PASS</p>
-            <p className="text-sm text-neutral-600 mt-3">Fees exceed resale value</p>
-            {item.price_low != null && item.price_high != null && (
-              <p className="text-xs text-neutral-700 mt-1">
-                Market range:{' '}
-                <span className="text-neutral-600">
-                  ${item.price_low.toFixed(0)} – ${item.price_high.toFixed(0)}
+          <div className="space-y-3">
+            {/* Target Bid */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium tracking-widest text-neutral-600 uppercase">Target Bid</span>
+              {hasMargin ? (
+                <span className="text-4xl font-black text-emerald-400 font-mono">
+                  ${Math.floor(calc.target)}<span className="text-2xl">.{String(Math.round((calc.target % 1) * 100)).padStart(2, '0')}</span>
                 </span>
-              </p>
-            )}
-          </>
+              ) : (
+                <span className="text-2xl font-black text-red-500">NO MARGIN</span>
+              )}
+            </div>
+
+            {/* Break-Even */}
+            <div className="flex items-center justify-between border-t border-neutral-800/60 pt-3">
+              <span className="text-xs font-medium tracking-widest text-neutral-600 uppercase">Break-Even</span>
+              <span className="text-2xl font-bold text-red-400 font-mono">
+                ${calc.breakEven.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Retail Max */}
+            <div className="flex items-center justify-between border-t border-neutral-800/60 pt-3">
+              <span className="text-xs font-medium tracking-widest text-neutral-600 uppercase">Retail Max</span>
+              <span className="text-2xl font-bold text-blue-400 font-mono">
+                ${calc.retailMax.toFixed(2)}
+              </span>
+            </div>
+
+            {/* Baseline Value */}
+            <div className="flex items-center justify-between border-t border-neutral-800/60 pt-3">
+              <span className="text-xs font-medium tracking-widest text-neutral-700 uppercase">Baseline</span>
+              <span className="text-sm font-mono text-neutral-600">
+                ${bid.base_market_value.toFixed(2)}
+              </span>
+            </div>
+          </div>
         )}
       </section>
 
@@ -228,24 +238,6 @@ export function TriageClient({
           ))}
         </div>
 
-        {/* Won/Lost row */}
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          {([
-            { value: 'won'  as ItemStatus, label: 'WON',  active: 'bg-green-700 text-white ring-2 ring-green-500 ring-offset-2 ring-offset-neutral-950' },
-            { value: 'lost' as ItemStatus, label: 'LOST', active: 'bg-red-800 text-white ring-2 ring-red-600 ring-offset-2 ring-offset-neutral-950' },
-          ]).map(s => (
-            <button
-              key={s.value}
-              onClick={() => saveStatus(s.value)}
-              disabled={saving}
-              className={`h-14 rounded-2xl text-sm font-bold transition-all active:scale-95 disabled:opacity-40 ${
-                status === s.value ? s.active : 'bg-neutral-800 text-neutral-600'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
       </section>
 
     </div>
