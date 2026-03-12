@@ -31,6 +31,7 @@ export interface Auction {
   buyer_premium: number
   state_tax:     number
   preset_id:     string | null
+  budget:        number | null
   is_active:     boolean
   created_at:    string
 }

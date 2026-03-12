@@ -91,15 +91,16 @@ VALUES
 
 -- Auction events
 CREATE TABLE auctions (
-  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  name           text        NOT NULL,
+  id             uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
+  name           text          NOT NULL,
   auction_date   date,
   location       text,
-  buyer_premium  numeric(6,4) NOT NULL DEFAULT 0.18,  -- 0.18 = 18%
-  state_tax      numeric(6,4) NOT NULL DEFAULT 0.07,  -- 0.07 = 7%
-  preset_id      uuid        REFERENCES auction_presets(id),
-  is_active      boolean      DEFAULT true,
-  created_at     timestamptz  DEFAULT now()
+  buyer_premium  numeric(6,4)  NOT NULL DEFAULT 0.18,  -- 0.18 = 18%
+  state_tax      numeric(6,4)  NOT NULL DEFAULT 0.07,  -- 0.07 = 7%
+  preset_id      uuid          REFERENCES auction_presets(id),
+  budget         numeric(10,2),                         -- Optional spend cap for this auction
+  is_active      boolean       DEFAULT true,
+  created_at     timestamptz   DEFAULT now()
 );
 
 

@@ -52,7 +52,7 @@ export function LiveHUD({
   auction,
   items,
 }: {
-  auction: { id: string; name: string; buyer_premium: number; state_tax: number }
+  auction: { id: string; name: string; buyer_premium: number; state_tax: number; budget: number | null }
   items:   LiveItem[]
 }) {
   // ── State ───────────────────────────────────────────────────
@@ -215,10 +215,21 @@ export function LiveHUD({
   // ── Derived display values ──────────────────────────────────
   const isPass    = current?.status === 'pass'
   const isLogged  = !!lotResult
+  const hasInput  = input.length > 0
   const hammerDisplay = input
     ? `$${input}`
     : isLogged && lotResult.hammer_price != null
     ? `$${lotResult.hammer_price.toFixed(2)}`
+    : null
+
+  // All-in spent: sum of won hammer prices × (1 + BP) × (1 + tax)
+  const overhead    = (1 + auction.buyer_premium) * (1 + auction.state_tax)
+  const spentTotal  = Object.values(results)
+    .filter(r => r.auction_result === 'won' && r.hammer_price != null)
+    .reduce((sum, r) => sum + r.hammer_price! * overhead, 0)
+  const budgetLeft  = auction.budget != null ? auction.budget - spentTotal : null
+  const budgetPct   = auction.budget != null && auction.budget > 0
+    ? Math.min(spentTotal / auction.budget, 1)
     : null
 
   // ── Render ─────────────────────────────────────────────────
@@ -230,29 +241,77 @@ export function LiveHUD({
     <div className="h-dvh bg-neutral-950 text-white flex flex-col overflow-hidden select-none">
 
       {/* ── Top bar ──────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
-        <Link
-          href={`/dashboard/auctions/${auction.id}`}
-          className="text-xs text-neutral-600 active:text-neutral-400 transition-colors"
-        >
-          ← Exit
-        </Link>
+      <div className="px-4 pt-4 pb-2 shrink-0">
+        <div className="flex items-center justify-between">
+          <Link
+            href={`/dashboard/auctions/${auction.id}`}
+            className="text-xs text-neutral-600 active:text-neutral-400 transition-colors"
+          >
+            ← Exit
+          </Link>
 
-        <div className="text-center">
-          <p className="text-xs text-neutral-600 font-medium">{auction.name}</p>
-          <p className="text-xs text-neutral-700">{index + 1} / {items.length}</p>
+          <div className="text-center">
+            <p className="text-xs text-neutral-600 font-medium">{auction.name}</p>
+            <p className="text-xs text-neutral-700">{index + 1} / {items.length}</p>
+          </div>
+
+          {/* Sync status */}
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${
+              syncStatus === 'synced'  ? 'bg-green-500' :
+              syncStatus === 'pending' ? 'bg-amber-400 animate-pulse' :
+                                         'bg-red-500'
+            }`} />
+            <span className="text-xs text-neutral-600">
+              {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Offline'}
+            </span>
+          </div>
         </div>
 
-        {/* Sync status */}
-        <div className="flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${
-            syncStatus === 'synced'  ? 'bg-green-500' :
-            syncStatus === 'pending' ? 'bg-amber-400 animate-pulse' :
-                                       'bg-red-500'
-          }`} />
-          <span className="text-xs text-neutral-600">
-            {syncStatus === 'synced' ? 'Synced' : syncStatus === 'pending' ? 'Saving…' : 'Offline'}
-          </span>
+        {/* ── Budget / Spent tracker ─────────────────────────── */}
+        <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="text-[10px] text-neutral-700 uppercase tracking-widest leading-none mb-0.5">Spent</p>
+              <p className={`font-mono text-sm font-bold tabular-nums ${
+                budgetPct != null && budgetPct >= 1 ? 'text-red-400' :
+                budgetPct != null && budgetPct >= 0.8 ? 'text-amber-400' :
+                'text-white'
+              }`}>
+                ${spentTotal.toFixed(0)}
+              </p>
+            </div>
+            {auction.budget != null && (
+              <>
+                <div className="text-neutral-800 text-sm">/</div>
+                <div>
+                  <p className="text-[10px] text-neutral-700 uppercase tracking-widest leading-none mb-0.5">Budget</p>
+                  <p className="font-mono text-sm font-bold tabular-nums text-neutral-500">
+                    ${auction.budget.toFixed(0)}
+                  </p>
+                </div>
+                {budgetLeft != null && (
+                  <div>
+                    <p className="text-[10px] text-neutral-700 uppercase tracking-widest leading-none mb-0.5">Left</p>
+                    <p className={`font-mono text-sm font-bold tabular-nums ${budgetLeft < 0 ? 'text-red-400' : 'text-neutral-400'}`}>
+                      {budgetLeft < 0 ? '-' : ''}${Math.abs(budgetLeft).toFixed(0)}
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {/* Progress bar — only shown when budget is set */}
+          {budgetPct != null && (
+            <div className="w-24 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  budgetPct >= 1 ? 'bg-red-500' : budgetPct >= 0.8 ? 'bg-amber-400' : 'bg-green-500'
+                }`}
+                style={{ width: `${(budgetPct * 100).toFixed(1)}%` }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -265,7 +324,7 @@ export function LiveHUD({
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             {current.lot_number && (
-              <span className="font-mono text-xs text-neutral-600 tracking-wider">
+              <span className="font-mono text-base font-black text-white tracking-widest">
                 LOT {current.lot_number}
               </span>
             )}
@@ -320,13 +379,15 @@ export function LiveHUD({
       <div className="mx-3 mt-2 grid grid-cols-2 gap-3 shrink-0">
         <button
           onClick={() => logResult('won')}
-          className="h-14 rounded-2xl bg-green-700 text-white text-base font-black tracking-widest active:bg-green-600 active:scale-[0.97] transition-all"
+          disabled={!hasInput}
+          className="h-14 rounded-2xl bg-green-700 text-white text-base font-black tracking-widest active:bg-green-600 active:scale-[0.97] transition-all disabled:opacity-25 disabled:cursor-not-allowed"
         >
           WON
         </button>
         <button
           onClick={() => logResult('lost')}
-          className="h-14 rounded-2xl bg-neutral-800 text-neutral-300 text-base font-black tracking-widest active:bg-neutral-700 active:scale-[0.97] transition-all"
+          disabled={!hasInput}
+          className="h-14 rounded-2xl bg-neutral-800 text-neutral-300 text-base font-black tracking-widest active:bg-neutral-700 active:scale-[0.97] transition-all disabled:opacity-25 disabled:cursor-not-allowed"
         >
           LOST
         </button>

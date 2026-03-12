@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import type { Auction } from '@/lib/types'
+import { DeleteAuctionButton } from './DeleteAuctionButton'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -85,6 +86,7 @@ function AuctionCard({ auction }: { auction: Auction }) {
 
       {/* Right: actions */}
       <div className="flex items-center gap-2 shrink-0">
+        <DeleteAuctionButton auctionId={auction.id} />
         <Link
           href={`/triage/${auction.id}`}
           className="rounded-md border border-neutral-200 dark:border-neutral-700 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"

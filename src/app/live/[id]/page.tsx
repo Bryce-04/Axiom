@@ -29,7 +29,7 @@ export default async function LivePage({
   const supabase = await createClient()
 
   const [{ data: auction }, { data: bids }, { data: items }] = await Promise.all([
-    supabase.from('auctions').select('id, name, buyer_premium, state_tax').eq('id', id).single(),
+    supabase.from('auctions').select('id, name, buyer_premium, state_tax, budget').eq('id', id).single(),
     supabase.from('bid_results').select('*').eq('auction_id', id),
     supabase
       .from('items')

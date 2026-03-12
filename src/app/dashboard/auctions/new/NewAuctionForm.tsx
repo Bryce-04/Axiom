@@ -17,6 +17,7 @@ export function NewAuctionForm({ presets }: { presets: AuctionPreset[] }) {
   const [location, setLocation] = useState('')
   const [buyerPremium, setBuyerPremium] = useState('18')
   const [stateTax, setStateTax] = useState('7')
+  const [budget, setBudget] = useState('')
 
   function applyPreset(preset: AuctionPreset) {
     setSelectedPresetId(preset.id)
@@ -46,6 +47,7 @@ export function NewAuctionForm({ presets }: { presets: AuctionPreset[] }) {
         buyer_premium: parseFloat(buyerPremium) / 100,
         state_tax: parseFloat(stateTax) / 100,
         preset_id: selectedPresetId,
+        budget: budget ? parseFloat(budget) : null,
       })
       .select('id')
       .single()
@@ -155,6 +157,22 @@ export function NewAuctionForm({ presets }: { presets: AuctionPreset[] }) {
             placeholder="e.g. Dallas, TX"
             className={inputClass}
           />
+        </Field>
+
+        {/* Budget */}
+        <Field label="Auction Budget" hint="Optional — tracks spending on /live">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">$</span>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={budget}
+              onChange={e => setBudget(e.target.value)}
+              placeholder="e.g. 5000"
+              className={inputClass + ' pl-7'}
+            />
+          </div>
         </Field>
 
         {/* Fees row */}
